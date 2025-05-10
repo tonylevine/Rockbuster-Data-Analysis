@@ -1,0 +1,42 @@
+WITH overdue_returns AS (
+    SELECT
+        r.customer_id,
+        COUNT(*) AS num_od_returns,
+        CEIL((EXTRACT(EPOCH FROM AVG(r.return_date-(r.rental_date + f.rental_duration* INTERVAL '1 day')))/86400)::numeric) AS avg_days_late
+    FROM rental r
+    JOIN inventory i USING(inventory_id)
+    JOIN film f USING(film_id)
+    WHERE (r.rental_date + f.rental_duration * INTERVAL '1 day') < r.return_date
+      AND r.return_date IS NOT NULL
+    GROUP BY r.customer_id
+),
+total_rentals AS (
+    SELECT 
+        customer_id,
+        COUNT(*) AS num_rentals
+    FROM rental
+    GROUP BY customer_id
+),
+cust_pct_od AS (
+    SELECT 
+        t.customer_id,
+        COALESCE(ROUND(o.num_od_returns::numeric / t.num_rentals::numeric, 2), 0) AS pct_od,
+        COALESCE(o.avg_days_late, 0) AS avg_days_late
+    FROM total_rentals t
+    JOIN overdue_returns o USING(customer_id)
+)
+SELECT 
+    COUNT(*) AS out_rentals,
+    r.customer_id,
+    ROUND(AVG(f.rental_rate), 2) AS avg_rate,
+    od.pct_od,
+    od.avg_days_late,
+    ROUND((COUNT(*) * od.pct_od * od.avg_days_late * (AVG(f.rental_rate)/2)), 2) AS expected_late_fees
+FROM rental r
+JOIN inventory i USING(inventory_id)
+JOIN film f USING(film_id)
+JOIN cust_pct_od od  USING(customer_id)
+WHERE r.rental_date > '2005-09-01' 
+  AND r.return_date IS NULL
+GROUP BY r.customer_id, od.pct_od, od.avg_days_late
+ORDER BY out_rentals DESC;
